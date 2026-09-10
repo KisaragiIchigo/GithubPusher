@@ -68,12 +68,15 @@ export function findReleaseBinaries(folderPath: string): ReleaseBinary[] {
   const candidateDirs = [
     path.join(folderPath, 'Release'),
     path.join(folderPath, 'release'),
+    path.join(folderPath, 'release-build'),
+    path.join(folderPath, 'releases'),
     path.join(folderPath, 'bin', 'Release'),
     path.join(folderPath, 'bin', 'x64', 'Release'),
     path.join(folderPath, 'bin', 'x86', 'Release'),
     path.join(folderPath, 'bin', 'ARM64', 'Release'),
-    path.join(folderPath, 'dist'),
+    path.join(folderPath, 'out'),
     path.join(folderPath, 'build'),
+    path.join(folderPath, 'dist'),
   ];
 
   const checkedDirs = new Set<string>();
@@ -86,6 +89,7 @@ export function findReleaseBinaries(folderPath: string): ReleaseBinary[] {
         const files = fs.readdirSync(dir);
         for (const file of files) {
           if (file.toLowerCase().endsWith('.exe')) {
+            if (file.toLowerCase() === 'elevate.exe') continue;
             const fullPath = path.join(dir, file);
             const stat = fs.statSync(fullPath);
             if (stat.isFile()) {
