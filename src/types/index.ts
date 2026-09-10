@@ -16,6 +16,29 @@ export interface ChangedFile {
   isSensitive: boolean;
 }
 
+export interface ReleaseBinary {
+  name: string;
+  fullPath: string;
+  relativePath: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+}
+
+export interface ReleaseOptions {
+  enabled: boolean;
+  tagName: string;
+  releaseTitle: string;
+  releaseNotes?: string;
+  selectedBinaryPaths: string[];
+}
+
+export interface GitCommit {
+  hash: string;
+  date: string;
+  message: string;
+  author_name: string;
+}
+
 export interface RepoStatus {
   path: string;
   folderName: string;
@@ -25,6 +48,8 @@ export interface RepoStatus {
   changedFiles: ChangedFile[];
   hasSensitiveFiles: boolean;
   sensitiveFiles: string[];
+  releaseBinaries: ReleaseBinary[];
+  recentCommits: GitCommit[];
 }
 
 export interface PushOptions {
@@ -37,6 +62,7 @@ export interface PushOptions {
   autoInit: boolean;
   forcePush?: boolean;
   pullBeforePush?: boolean;
+  releaseOptions?: ReleaseOptions;
 }
 
 export interface PushLog {
@@ -46,6 +72,13 @@ export interface PushLog {
   message: string;
 }
 
+export interface PushResult {
+  success: boolean;
+  message: string;
+  repoUrl?: string;
+  releaseUrl?: string;
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string;
   scanRepo: (folderPath: string) => Promise<RepoStatus>;
@@ -53,12 +86,13 @@ export interface ElectronAPI {
   getAccounts: () => Promise<GitHubAccount[]>;
   saveAccount: (account: GitHubAccount) => Promise<GitHubAccount[]>;
   deleteAccount: (id: string) => Promise<GitHubAccount[]>;
-  executePush: (options: PushOptions) => Promise<{ success: boolean; message: string }>;
+  executePush: (options: PushOptions) => Promise<PushResult>;
   onPushLog: (callback: (log: PushLog) => void) => () => void;
   updateGitignore: (folderPath: string, patterns: string[]) => Promise<boolean>;
   minimizeWindow: () => void;
   closeWindow: () => void;
   openExternal: (url: string) => Promise<void>;
+  notify: (title: string, body: string) => Promise<void>;
 }
 
 declare global {

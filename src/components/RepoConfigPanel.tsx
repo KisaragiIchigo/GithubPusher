@@ -1,5 +1,5 @@
-import React from 'react';
-import { Folder, GitBranch, Globe, RefreshCw, Sparkles, Download, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Folder, GitBranch, Globe, RefreshCw, Sparkles, Download, Zap, History, ChevronDown, ChevronRight } from 'lucide-react';
 import type { RepoStatus } from '../types';
 
 interface RepoConfigPanelProps {
@@ -33,6 +33,7 @@ export const RepoConfigPanel: React.FC<RepoConfigPanelProps> = ({
   onChangeFolder,
   onRescan,
 }) => {
+  const [showCommits, setShowCommits] = useState(false);
   return (
     <div className="p-4 rounded-xl neon-acrylic-cyan space-y-4">
       {/* Folder Header */}
@@ -80,6 +81,49 @@ export const RepoConfigPanel: React.FC<RepoConfigPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Recent Git Commits Accordion */}
+      {repoStatus.isGitRepo && repoStatus.recentCommits && repoStatus.recentCommits.length > 0 && (
+        <div className="rounded-lg bg-[#040915] border border-neon_cyan-500/20 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowCommits(!showCommits)}
+            className="w-full px-3 py-1.5 flex items-center justify-between text-xs font-mono text-foreground-secondary hover:text-neon_cyan-300 hover:bg-neon_cyan-500/5 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <History className="w-3.5 h-3.5 text-neon_cyan-400" />
+              <span>直近のコミット履歴 ({repoStatus.recentCommits.length}件)</span>
+            </div>
+            {showCommits ? (
+              <ChevronDown className="w-3.5 h-3.5 text-neon_cyan-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-foreground-muted" />
+            )}
+          </button>
+
+          {showCommits && (
+            <div className="px-3 pb-2 pt-1 border-t border-neon_cyan-500/10 divide-y divide-neon_cyan-500/10 font-mono">
+              {repoStatus.recentCommits.map((c) => (
+                <div key={c.hash} className="py-1.5 first:pt-1 last:pb-0 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="px-1.5 py-0.5 rounded bg-neon_cyan-500/10 text-neon_cyan-400 border border-neon_cyan-500/30 text-[10px] font-bold flex-shrink-0">
+                      {c.hash}
+                    </span>
+                    <span className="text-foreground-primary truncate text-xs" title={c.message}>
+                      {c.message}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-foreground-muted flex-shrink-0 flex items-center gap-2">
+                    <span>{c.author_name}</span>
+                    <span>•</span>
+                    <span>{c.date}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Target Remote URL */}
       <div>

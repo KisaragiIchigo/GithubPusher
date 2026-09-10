@@ -7,7 +7,8 @@ import { AccountManagerModal } from './components/AccountManagerModal';
 import { RepoConfigPanel } from './components/RepoConfigPanel';
 import { ExclusionManager } from './components/ExclusionManager';
 import { CommitAndPushPanel } from './components/CommitAndPushPanel';
-import type { GitHubAccount, RepoStatus, PushLog, ChangedFile } from './types';
+import { ReleaseConfigPanel } from './components/ReleaseConfigPanel';
+import type { GitHubAccount, RepoStatus, PushLog, ChangedFile, ReleaseOptions, PushResult } from './types';
 
 export const App: React.FC = () => {
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
@@ -33,12 +34,19 @@ export const App: React.FC = () => {
   ]);
   const [pushLogs, setPushLogs] = useState<PushLog[]>([]);
   const [isPushing, setIsPushing] = useState(false);
+  const [lastPushResult, setLastPushResult] = useState<PushResult | null>(null);
+  const [releaseOptions, setReleaseOptions] = useState<ReleaseOptions>({
+    enabled: true,
+    tagName: 'v1.0.0',
+    releaseTitle: 'Release v1.0.0',
+    selectedBinaryPaths: [],
+  });
 
-  // Recent repositories list persisted in localStorage
+  // Recent repositories list persisted in localStorage (max 3)
   const [recentFolders, setRecentFolders] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('github_pusher_recents');
-      return saved ? JSON.parse(saved) : [];
+      return saved ? JSON.parse(saved).slice(0, 3) : [];
     } catch {
       return [];
     }
@@ -69,6 +77,8 @@ export const App: React.FC = () => {
   const handleFolderSelected = useCallback(async (folderPath: string) => {
     if (!window.electronAPI) return;
 
+    setLastPushResult(null);
+
     try {
       const status = await window.electronAPI.scanRepo(folderPath);
       setRepoStatus(status);
@@ -79,9 +89,9 @@ export const App: React.FC = () => {
         setRemoteUrl('');
       }
 
-      // Save to recent folders
+      // Save to recent folders (max 3)
       setRecentFolders((prev) => {
-        const updated = [folderPath, ...prev.filter((p) => p !== folderPath)].slice(0, 6);
+        const updated = [folderPath, ...prev.filter((p) => p !== folderPath)].slice(0, 3);
         try {
           localStorage.setItem('github_pusher_recents', JSON.stringify(updated));
         } catch {
@@ -89,6 +99,23 @@ export const App: React.FC = () => {
         }
         return updated;
       });
+
+      // Initialize release options if exe binaries are detected
+      if (status.releaseBinaries && status.releaseBinaries.length > 0) {
+        setReleaseOptions({
+          enabled: true,
+          tagName: 'v1.0.0',
+          releaseTitle: `${status.folderName} v1.0.0`,
+          selectedBinaryPaths: status.releaseBinaries.map((b) => b.fullPath),
+        });
+      } else {
+        setReleaseOptions({
+          enabled: false,
+          tagName: 'v1.0.0',
+          releaseTitle: 'Release v1.0.0',
+          selectedBinaryPaths: [],
+        });
+      }
 
       // Show Account Selector modal
       setIsAccountSelectorOpen(true);
@@ -283,9 +310,20 @@ export const App: React.FC = () => {
         autoInit,
         forcePush,
         pullBeforePush,
+        releaseOptions: repoStatus.releaseBinaries?.length > 0 ? releaseOptions : undefined,
       });
 
+      setLastPushResult(result);
+
       if (result.success) {
+        // Desktop OS Notification
+        if (window.electronAPI && typeof window.electronAPI.notify === 'function') {
+          const notifyMsg = result.releaseUrl
+            ? `プッシュ＆Release配信 (${repoStatus.folderName}) が完了しました！`
+            : `プッシュ (${repoStatus.folderName}) が完了しました！`;
+          window.electronAPI.notify('GithubPusher', notifyMsg);
+        }
+
         // Rescan repository on success
         setTimeout(() => {
           handleRescan();
@@ -367,12 +405,22 @@ export const App: React.FC = () => {
               onSaveGitignore={handleSaveGitignore}
             />
 
+            {/* Optional: GitHub Releases Binary Publish Panel (only shown when .exe is detected) */}
+            {repoStatus.releaseBinaries && repoStatus.releaseBinaries.length > 0 && (
+              <ReleaseConfigPanel
+                binaries={repoStatus.releaseBinaries}
+                options={releaseOptions}
+                onChangeOptions={setReleaseOptions}
+              />
+            )}
+
             {/* Bottom: Commit Message, Push & Real-time Console */}
             <CommitAndPushPanel
               commitMessage={commitMessage}
               isPushing={isPushing}
               pushLogs={pushLogs}
               canPush={canPush}
+              lastPushResult={lastPushResult}
               onCommitMessageChange={setCommitMessage}
               onExecutePush={handleExecutePush}
               onGenerateDefaultMessage={generateDefaultCommitMessage}

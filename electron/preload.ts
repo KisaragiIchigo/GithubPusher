@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { RepoStatus, GitHubAccount, PushOptions, PushLog } from '../src/types';
+import type { RepoStatus, GitHubAccount, PushOptions, PushLog, PushResult } from '../src/types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File): string => {
@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteAccount: (id: string): Promise<GitHubAccount[]> => {
     return ipcRenderer.invoke('accounts:delete', id);
   },
-  executePush: (options: PushOptions): Promise<{ success: boolean; message: string }> => {
+  executePush: (options: PushOptions): Promise<PushResult> => {
     return ipcRenderer.invoke('git:execute-push', options);
   },
   onPushLog: (callback: (log: PushLog) => void): (() => void) => {
@@ -47,5 +47,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openExternal: (url: string): Promise<void> => {
     return ipcRenderer.invoke('shell:open-external', url);
+  },
+  notify: (title: string, body: string): Promise<void> => {
+    return ipcRenderer.invoke('app:notify', title, body);
   },
 });

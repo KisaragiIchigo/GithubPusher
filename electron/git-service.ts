@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit, { SimpleGit } from 'simple-git';
-import type { RepoStatus, ChangedFile, PushOptions, PushLog, GitHubAccount, FileStatusType } from '../src/types';
+import type { RepoStatus, ChangedFile, PushOptions, PushLog, GitHubAccount, FileStatusType, ReleaseBinary, GitCommit, PushResult } from '../src/types';
+import { executeReleasePublish } from './github-release-service';
 
 const SENSITIVE_PATTERNS = [
   /^\.env(\..+)?$/i,
@@ -45,11 +46,91 @@ const DEFAULT_EXCLUDE_PATTERNS = [
   'node_modules',
   'dist',
   'build',
+  'Release',
+  'release',
+  '*.exe',
   '.env',
   '.env.*',
   '__pycache__',
   '.venv',
 ];
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function findReleaseBinaries(folderPath: string): ReleaseBinary[] {
+  const binaries: ReleaseBinary[] = [];
+
+  // Candidate release directories commonly used in C#, C++, Rust, Electron etc.
+  const candidateDirs = [
+    path.join(folderPath, 'Release'),
+    path.join(folderPath, 'release'),
+    path.join(folderPath, 'bin', 'Release'),
+    path.join(folderPath, 'bin', 'x64', 'Release'),
+    path.join(folderPath, 'bin', 'x86', 'Release'),
+    path.join(folderPath, 'bin', 'ARM64', 'Release'),
+    path.join(folderPath, 'dist'),
+    path.join(folderPath, 'build'),
+  ];
+
+  const checkedDirs = new Set<string>();
+
+  for (const dir of candidateDirs) {
+    const lower = dir.toLowerCase();
+    if (fs.existsSync(dir) && !checkedDirs.has(lower)) {
+      checkedDirs.add(lower);
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.toLowerCase().endsWith('.exe')) {
+            const fullPath = path.join(dir, file);
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) {
+              binaries.push({
+                name: file,
+                fullPath,
+                relativePath: path.relative(folderPath, fullPath).replace(/\\/g, '/'),
+                sizeBytes: stat.size,
+                sizeFormatted: formatBytes(stat.size),
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error reading candidate release dir:', dir, err);
+      }
+    }
+  }
+
+  // Also check project root for any direct .exe if no release folder binary was found
+  if (binaries.length === 0) {
+    try {
+      const rootFiles = fs.readdirSync(folderPath);
+      for (const file of rootFiles) {
+        if (file.toLowerCase().endsWith('.exe')) {
+          const fullPath = path.join(folderPath, file);
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile()) {
+            binaries.push({
+              name: file,
+              fullPath,
+              relativePath: file,
+              sizeBytes: stat.size,
+              sizeFormatted: formatBytes(stat.size),
+            });
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return binaries;
+}
 
 function isDefaultExcluded(filePath: string): boolean {
   const norm = filePath.replace(/\\/g, '/').toLowerCase();
@@ -131,6 +212,8 @@ export async function scanRepository(folderPath: string): Promise<RepoStatus> {
       changedFiles,
       hasSensitiveFiles: sensitiveFiles.length > 0,
       sensitiveFiles,
+      releaseBinaries: findReleaseBinaries(folderPath),
+      recentCommits: [],
     };
   }
 
@@ -177,6 +260,24 @@ export async function scanRepository(folderPath: string): Promise<RepoStatus> {
     console.error('Error reading git status:', err);
   }
 
+  let recentCommits: GitCommit[] = [];
+  try {
+    const logSummary = await git.log({ maxCount: 5 });
+    recentCommits = logSummary.all.map((c) => ({
+      hash: c.hash.substring(0, 7),
+      date: new Date(c.date).toLocaleString('ja-JP', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      message: c.message,
+      author_name: c.author_name,
+    }));
+  } catch {
+    // Initial branch with no commits
+  }
+
   return {
     path: folderPath,
     folderName,
@@ -186,6 +287,8 @@ export async function scanRepository(folderPath: string): Promise<RepoStatus> {
     changedFiles,
     hasSensitiveFiles: sensitiveFiles.length > 0,
     sensitiveFiles,
+    releaseBinaries: findReleaseBinaries(folderPath),
+    recentCommits,
   };
 }
 
@@ -210,7 +313,7 @@ export async function executePushPipeline(
   options: PushOptions,
   account: GitHubAccount,
   sendLog: (log: PushLog) => void
-): Promise<{ success: boolean; message: string }> {
+): Promise<PushResult> {
   const { repoPath, remoteUrl, branch, commitMessage, excludedPaths, autoInit } = options;
   const git: SimpleGit = simpleGit(repoPath);
 
@@ -354,9 +457,41 @@ export async function executePushPipeline(
       postLog('info', 'リモート設定から一時認証情報を安全に消去しました');
     }
 
+    // Parse web URL for GitHub repository
+    let webRepoUrl: string | undefined;
+    const cleanRepoMatch = remoteUrl.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)(\.git)?$/i);
+    if (cleanRepoMatch) {
+      webRepoUrl = `https://github.com/${cleanRepoMatch[1]}/${cleanRepoMatch[2]}`;
+    }
+
+    let publishedReleaseUrl: string | undefined;
+
+    // Execute GitHub Releases publishing if enabled and binaries are selected
+    if (
+      options.releaseOptions &&
+      options.releaseOptions.enabled &&
+      options.releaseOptions.selectedBinaryPaths.length > 0
+    ) {
+      postLog('step', 'GitHub Releases へのバイナリアセット配信を開始します...');
+      const releaseResult = await executeReleasePublish(
+        remoteUrl,
+        branch,
+        options.releaseOptions,
+        account,
+        sendLog
+      );
+      if (releaseResult.success && releaseResult.releaseUrl) {
+        publishedReleaseUrl = releaseResult.releaseUrl;
+      } else if (!releaseResult.success) {
+        postLog('warning', `GitHub Releases 配信で注意: ${releaseResult.message}`);
+      }
+    }
+
     return {
       success: true,
       message: 'GitHubへのプッシュが正常に完了しました。',
+      repoUrl: webRepoUrl,
+      releaseUrl: publishedReleaseUrl,
     };
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);

@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Terminal, Loader2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
-import type { PushLog } from '../types';
+import { Send, Terminal, Loader2, CheckCircle2, AlertCircle, RefreshCw, ExternalLink, Tag } from 'lucide-react';
+import type { PushLog, PushResult } from '../types';
 
 interface CommitAndPushPanelProps {
   commitMessage: string;
   isPushing: boolean;
   pushLogs: PushLog[];
   canPush: boolean;
+  lastPushResult?: PushResult | null;
   onCommitMessageChange: (msg: string) => void;
   onExecutePush: () => void;
   onGenerateDefaultMessage: () => void;
@@ -17,12 +18,32 @@ export const CommitAndPushPanel: React.FC<CommitAndPushPanelProps> = ({
   isPushing,
   pushLogs,
   canPush,
+  lastPushResult,
   onCommitMessageChange,
   onExecutePush,
   onGenerateDefaultMessage,
 }) => {
   const [showLogs, setShowLogs] = useState(true);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  const PREFIXES = [
+    { label: 'feat:', desc: '新機能', color: 'text-neon_cyan-400 border-neon_cyan-500/30 hover:bg-neon_cyan-500/10' },
+    { label: 'fix:', desc: '修正', color: 'text-status-error border-status-error/30 hover:bg-status-error/10' },
+    { label: 'update:', desc: '更新', color: 'text-neon_magenta-400 border-neon_magenta-500/30 hover:bg-neon_magenta-500/10' },
+    { label: 'release:', desc: 'リリース', color: 'text-neon_amber-400 border-neon_amber-400/30 hover:bg-neon_amber-400/10' },
+  ];
+
+  const handleApplyPrefix = (prefix: string) => {
+    const cleanPrefix = `${prefix} `;
+    const match = commitMessage.match(/^(feat|fix|update|release|docs|style|refactor|test|chore):\s*/i);
+    if (match) {
+      onCommitMessageChange(commitMessage.replace(match[0], cleanPrefix));
+    } else if (!commitMessage.trim()) {
+      onCommitMessageChange(cleanPrefix);
+    } else {
+      onCommitMessageChange(`${cleanPrefix}${commitMessage}`);
+    }
+  };
 
   useEffect(() => {
     if (logEndRef.current) {
@@ -36,7 +57,24 @@ export const CommitAndPushPanel: React.FC<CommitAndPushPanelProps> = ({
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-mono text-foreground-secondary">コミットメッセージ</label>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-mono text-foreground-secondary">コミットメッセージ</label>
+              {/* Quick Prefix Badges */}
+              <div className="flex items-center gap-1">
+                {PREFIXES.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => handleApplyPrefix(p.label)}
+                    disabled={isPushing}
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors ${p.color}`}
+                    title={`${p.label} (${p.desc}) を先頭に付与`}
+                  >
+                    +{p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button
               type="button"
               onClick={onGenerateDefaultMessage}
@@ -136,6 +174,40 @@ export const CommitAndPushPanel: React.FC<CommitAndPushPanelProps> = ({
         {pushLogs.some((l) => l.type === 'error' && (l.message.includes('fetch first') || l.message.includes('rejected') || l.message.includes('リモート'))) && (
           <div className="mt-2 p-2 rounded bg-neon_amber-400/10 border border-neon_amber-400/30 text-xs font-mono text-neon_amber-400 flex items-center justify-between">
             <span>💡 リモートの既存ファイル（LICENSE/README等）との統合または強制プッシュ（--force）が選択可能です。</span>
+          </div>
+        )}
+
+        {/* Quick External Links on Success */}
+        {lastPushResult?.success && (lastPushResult.repoUrl || lastPushResult.releaseUrl) && (
+          <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/40 flex flex-wrap items-center justify-between gap-2 shadow-neon-cyan">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <span className="text-xs font-mono font-bold text-emerald-300">
+                GitHubへの反映が完了しました
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {lastPushResult.repoUrl && (
+                <button
+                  type="button"
+                  onClick={() => window.electronAPI.openExternal(lastPushResult.repoUrl!)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-neon_cyan-500/20 hover:bg-neon_cyan-500/30 border border-neon_cyan-500/50 text-xs font-mono text-neon_cyan-300 hover:text-neon_cyan-100 transition-all shadow-sm active:scale-95"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>GitHubで開く</span>
+                </button>
+              )}
+              {lastPushResult.releaseUrl && (
+                <button
+                  type="button"
+                  onClick={() => window.electronAPI.openExternal(lastPushResult.releaseUrl!)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-neon_magenta-500/20 hover:bg-neon_magenta-500/30 border border-neon_magenta-500/50 text-xs font-mono text-neon_magenta-300 hover:text-neon_magenta-100 transition-all shadow-sm active:scale-95"
+                >
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Releasesで開く</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

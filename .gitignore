@@ -24,3 +24,10 @@ __pycache__
 .venv
 .gemini/
 dist-electron
+release-build
+Release
+release
+*.exe
+electron/github-release-service.ts
+scripts/build-exe.ps1
+src/components/ReleaseConfigPanel.tsx

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Notification } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAccounts, saveAccount, deleteAccount } from './account-store';
@@ -141,5 +141,16 @@ ipcMain.handle('git:execute-push', async (_event, options: PushOptions) => {
 ipcMain.handle('shell:open-external', async (_event, url: string) => {
   if (url.startsWith('https://') || url.startsWith('http://')) {
     await shell.openExternal(url);
+  }
+});
+
+ipcMain.handle('app:notify', async (_event, title: string, body: string) => {
+  if (Notification.isSupported()) {
+    const iconPath = path.join(__dirname, '../public/icon.png');
+    new Notification({
+      title,
+      body,
+      icon: iconPath,
+    }).show();
   }
 });
